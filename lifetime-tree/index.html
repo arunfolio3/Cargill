@@ -172,6 +172,13 @@ body.printing .modal{display:none!important}
 .herd th,.herd td{white-space:nowrap}
 .herd tr.l3 td{background:var(--primary-50);font-weight:600}
 .herd tr.tot td{font-weight:700;border-bottom:0}
+.herd .gest{margin-top:10px;padding-top:12px;border-top:1px solid var(--border-2)}
+.herd .gest-h{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:8px;cursor:help}
+.herd .gest-h .lbl{font-size:12px;font-weight:600;color:var(--text-2)}
+.herd .gest .yin{font-size:15px}
+.herd .gest-ab{display:flex;flex-direction:column;gap:2px}
+.herd .gest-ab em{font-style:normal;font-size:11px;color:var(--muted-2);margin-left:4px}
+.herd-strip .gs{border-left:1px solid var(--border-2)}
 
 /* underlying data drawer */
 .drawer{margin:0 16px 16px;background:#fff;border:1px solid var(--border);border-radius:var(--radius)}
@@ -454,20 +461,24 @@ Object.entries(BENCH_TEXT).forEach(([k,t])=>{ BENCH[k].text=t; });
 /* Every box on the tree is an input — except Herd Lifetime Productivity */
 /* Leaf boxes are inputs; every box above them is calculated from the boxes that point into it */
 const INPUTS = {
-  milkLact:{unit:"kg",dp:0}, parities:{unit:"",dp:2}, lactLen:{unit:"days"}, ci:{unit:"days"}, replDelta:{unit:"",neg:true,dp:2},
+  milkLact:{unit:"kg",dp:0}, parities:{unit:"",dp:2}, gestation:{unit:"days",dp:0}, lactLen:{unit:"days"}, ci:{unit:"days"}, replDelta:{unit:"",neg:true,dp:2},
   dim:{unit:"days"}, dimDev:{unit:""}, milkDay:{unit:"kg",dp:2}, cull:{unit:"%",pct:true},
   dry:{unit:"days"}, peak:{unit:"kg"}, platinum:{unit:"%",pct:true}, ratio:{unit:"%",pct:true,dp:2,nomax:true},   // can exceed 100% (more replacements than cows)
   daysOpen:{unit:"days"}, preg:{unit:"%",pct:true}, l1w10:{unit:"kg"}, afc:{unit:"months"}, ncr:{unit:"%",pct:true},
 };
-const GESTATION = 280; // days — confirmed by the client 05/11/2026 (matches the Days open I-icon: "assuming a 280-day gestation")
+const GESTATION_DEFAULT = 280; // days — confirmed by the client 05/11/2026; editable per scenario in the Herd Structure box
+const gest = s => { const v=(s.gestation===undefined) ? GESTATION_DEFAULT : num(s.gestation); return v; };
+KPI.gestation = {label:"Gestation length", unit:"days", fmt:"int", dir:0, input:true,
+  formula:"Links Days open and Calving interval: Calving interval = Days open + Gestation length. If you edit Gestation length, Days open and Dry period stay; Calving interval updates, then Lactation length."};
+DESC.gestation = ["Average length of pregnancy, in days (default 280). It links Days open and Calving interval on the tree."];
 Object.keys(KPI).forEach(k=>{ KPI[k].input = !!INPUTS[k]; if(INPUTS[k] && !["milkLact","parities","lactLen","ci","replDelta"].includes(k)) delete KPI[k].formula; });
 Object.assign(KPI.hlp,      {formula:"Milk Production / Lactation × Parities"});
 Object.assign(KPI.milkLact, {formula:"Milk Prod. / Lactating day × Lactation length"});
 Object.assign(KPI.parities, {formula:"Σ (lactation number × % of herd in that lactation) — from the Herd Structure counts (L7+ counted as 7)"});
 Object.assign(KPI.lactLen,  {formula:"Calving interval − Dry period. If you edit Lactation length, Calving interval stays and Dry period updates (= Calving interval − Lactation length)."});
-Object.assign(KPI.ci,       {formula:"Days open + Gestation length (280 days). If you edit Calving interval, Dry period stays and Lactation length (= Calving interval − Dry period) and Days open (= Calving interval − 280) update."});
+Object.assign(KPI.ci,       {formula:"Days open + Gestation length (Herd Structure box, default 280 days). If you edit Calving interval, Dry period stays and Lactation length (= Calving interval − Dry period) and Days open (= Calving interval − Gestation length) update."});
 Object.assign(KPI.dry,      {formula:"If you edit Dry period, Calving interval stays and Lactation length updates (= Calving interval − Dry period)."});
-Object.assign(KPI.daysOpen, {formula:"If you edit Days open, Dry period stays; Calving interval updates (= Days open + 280), then Lactation length (= Calving interval − Dry period)."});
+Object.assign(KPI.daysOpen, {formula:"If you edit Days open, Dry period stays; Calving interval updates (= Days open + Gestation length), then Lactation length (= Calving interval − Dry period)."});
 Object.assign(KPI.replDelta,{formula:"Current replacements − Required replacements, where Current = Replacement/Cow ratio × total cows (Herd Structure) and Required = 2 × total cows × Age at First Calving ÷ 24 × Annual culling rate × (1 + Non-Completion Rate)"});
 
 const num = v => (v===null||v===""||v===undefined||isNaN(+v)) ? null : +v;
@@ -479,13 +490,15 @@ const herdTotal = s => s.animals.reduce((p,x)=>p+(num(x)||0),0);
    | Calving interval  | Dry period        | Lactation length, Days open          |
    | Lactation length  | Calving interval  | Dry period                           |
    | Dry period        | Calving interval  | Lactation length                     |
-   | Days open         | Dry period        | Calving interval, then Lactation len |  */
+   | Days open         | Dry period        | Calving interval, then Lactation len |
+   | Gestation length  | Days open, Dry    | Calving interval, then Lactation len |  (added 11/11/2026)  */
 function reproRules(s, ch, updated){
   const n=num;
-  if(ch.has("ci")){       if(n(s.ci)!=null){ s.daysOpen=n(s.ci)-GESTATION; if(n(s.dry)!=null) s.lactLen=n(s.ci)-n(s.dry); } updated.add("daysOpen"); updated.add("lactLen"); }
+  const G=gest(s);
+  if(ch.has("ci")){       if(n(s.ci)!=null && G!=null){ s.daysOpen=n(s.ci)-G; if(n(s.dry)!=null) s.lactLen=n(s.ci)-n(s.dry); } updated.add("daysOpen"); updated.add("lactLen"); }
   if(ch.has("lactLen")){  if(n(s.ci)!=null && n(s.lactLen)!=null) s.dry=n(s.ci)-n(s.lactLen); updated.add("dry"); }
   if(ch.has("dry")){      if(n(s.ci)!=null && n(s.dry)!=null) s.lactLen=n(s.ci)-n(s.dry); updated.add("lactLen"); }
-  if(ch.has("daysOpen")){ if(n(s.daysOpen)!=null){ s.ci=n(s.daysOpen)+GESTATION; if(n(s.dry)!=null) s.lactLen=s.ci-n(s.dry); } updated.add("ci"); updated.add("lactLen"); }
+  if(ch.has("daysOpen")||ch.has("gestation")){ if(n(s.daysOpen)!=null && G!=null){ s.ci=n(s.daysOpen)+G; if(n(s.dry)!=null) s.lactLen=s.ci-n(s.dry); } updated.add("ci"); updated.add("lactLen"); }
 }
 // further up the tree (run after the reproduction rules)
 const DERIVE = [
@@ -509,14 +522,14 @@ const DEFAULTS = {
   meta:{farm:"",site:"",start:"2023-01-01",end:"2023-12-31"},
   names:{A:"Current",B:"What If"},
   // Days open 125 + 280 gestation → Calving interval 405 (as on the workbook trees); Milk/day, ratio & NCR kept at full precision
-  A:{daysOpen:125, dry:55, milkDay:35.7986, dim:30, dimDev:30, peak:null, l1w10:null, preg:83, platinum:null,
+  A:{gestation:280, daysOpen:125, dry:55, milkDay:35.7986, dim:30, dimDev:30, peak:null, l1w10:null, preg:83, platinum:null,
      cull:35, ratio:100.9317, afc:25, ncr:18.2518, animals:[206,170,124,84,45,10,5]},
-  B:{daysOpen:125, dry:60, milkDay:38.9328, dim:null, dimDev:null, peak:null, l1w10:null, preg:83, platinum:null,
+  B:{gestation:280, daysOpen:125, dry:60, milkDay:38.9328, dim:null, dimDev:null, peak:null, l1w10:null, preg:83, platinum:null,
      cull:30, ratio:85.4037, afc:24, ncr:17.7048, animals:[180,150,125,100,70,19,0]},
 };
 const DEFAULT_NAMES = {A:"Current", B:"What If"};
 const nm = k => ((state.names&&state.names[k])||"").trim() || DEFAULT_NAMES[k];
-const STORE_KEY = "hl-lifetime-tree-v9";
+const STORE_KEY = "hl-lifetime-tree-v10";
 const clone = o => JSON.parse(JSON.stringify(o));
 const freshState = ()=>{ const d=clone(DEFAULTS); withDerived(d.A); withDerived(d.B); return d; };
 let state = (()=>{ try{ const s=JSON.parse(localStorage.getItem(STORE_KEY)); if(s&&s.A&&s.B&&s.meta) return s; }catch(e){} return freshState(); })();
@@ -662,12 +675,16 @@ function herdHTML(mode){
     const rows=LACT.map((l,i)=>`<tr><td>${l}</td>${sc.map(s=>`<td class="c${s.toLowerCase()}">${fmt(C[s].counts[i],"int")}</td><td class="p">${fmt(C[s].dist[i],"pct0")}</td>`).join("")}</tr>`).join("");
     const l3=`<tr class="l3"><td>L3+</td>${sc.map(s=>`<td></td><td>${fmt(C[s].l3plus,"pct0")}${sd(C[s])}</td>`).join("")}</tr>`;
     const tot=`<tr class="tot"><td>Total</td>${sc.map(s=>`<td>${fmt(C[s].cows,"int")}</td><td class="p">100%</td>`).join("")}</tr>`;
-    return hdr+`<table>${head}${rows}${l3}${tot}</table>`;
+    return hdr+`<table>${head}${rows}${l3}${tot}</table>
+      <div class="gest"><div class="gest-h" data-tip="gestation"><span class="lbl">Gestation length</span>${infoBtn}</div>
+        <div class="gest-ab">${sc.map(k=>`<span class="vrow ${k.toLowerCase()}">${badge(k)}<span class="num">${fmt(gest(state[k]),"int")}</span><em>days</em></span>`).join("")}</div></div>`;
   }
   const s=state[mode];
   const rows=LACT.map((l,i)=>`<tr><td>${l}</td><td><input class="yin herd-in" type="text" maxlength="9" inputmode="numeric" autocomplete="off" data-min="0" data-dp="0" data-arr="animals" data-i="${i}" value="${fmtInput(s.animals[i],0)}" aria-label="${l} count"></td><td class="p" data-dist="${i}">—</td></tr>`).join("");
   return hdr+`<table><tr><th>Parity</th><th>Count</th><th>%</th></tr>${rows}
-    <tr class="l3"><td>L3+</td><td></td><td data-l3>—</td></tr><tr class="tot"><td>Total</td><td data-tot style="padding-right:10px">—</td><td class="p">100%</td></tr></table>`;
+    <tr class="l3"><td>L3+</td><td></td><td data-l3>—</td></tr><tr class="tot"><td>Total</td><td data-tot style="padding-right:10px">—</td><td class="p">100%</td></tr></table>
+    <div class="gest"><div class="gest-h" data-tip="gestation"><span class="lbl">Gestation length</span>${infoBtn}</div>
+      <div class="yw"><input class="yin" type="text" maxlength="5" inputmode="numeric" autocomplete="off" data-min="0" data-y="gestation" value="${fmtInput(gest(s),0)}" placeholder="Enter" aria-label="Gestation length"><span class="unit">days</span></div></div>`;
 }
 function renderTree(el, mode){
   el.classList.toggle("single", mode!=="AB");
@@ -679,9 +696,9 @@ function renderTree(el, mode){
 }
 function herdStripHTML(mode){
   const sc = mode==="AB" ? ["A","B"] : [mode];
-  const head=`<tr><th>Herd Structure<em>Lactation tree · count and %</em></th>${LACT.map(l=>`<th>${l}</th>`).join("")}<th>L3+</th><th>Total</th></tr>`;
+  const head=`<tr><th>Herd Structure<em>Lactation tree · count and %</em></th>${LACT.map(l=>`<th>${l}</th>`).join("")}<th>L3+</th><th>Total</th><th class="gs">Gestation</th></tr>`;
   const rows=sc.map(k=>{ const c=calc(state[k]), st=status("l3plus",c);
-    return `<tr class="${mode==="AB"?k.toLowerCase():""}"><td>${mode==="AB"?`<span class="dot ${k.toLowerCase()}" style="width:8px;height:8px;margin-right:6px"></span>`:""}${esc(nm(k))}</td>${LACT.map((l,i)=>`<td><b>${fmt(c.counts[i],"int")}</b><small>${fmt(c.dist[i],"pct0")}</small></td>`).join("")}<td class="l3"><b>${fmt(c.l3plus,"pct0")}</b>${st?` <span class="sdot ${st}"></span>`:""}</td><td><b>${fmt(c.cows,"int")}</b></td></tr>`; }).join("");
+    return `<tr class="${mode==="AB"?k.toLowerCase():""}"><td>${mode==="AB"?`<span class="dot ${k.toLowerCase()}" style="width:8px;height:8px;margin-right:6px"></span>`:""}${esc(nm(k))}</td>${LACT.map((l,i)=>`<td><b>${fmt(c.counts[i],"int")}</b><small>${fmt(c.dist[i],"pct0")}</small></td>`).join("")}<td class="l3"><b>${fmt(c.l3plus,"pct0")}</b>${st?` <span class="sdot ${st}"></span>`:""}</td><td><b>${fmt(c.cows,"int")}</b></td><td class="gs"><b>${fmt(gest(state[k]),"int")}</b><small>days</small></td></tr>`; }).join("");
   return `<table>${head}${rows}</table>`;
 }
 function updateScenarioValues(){
